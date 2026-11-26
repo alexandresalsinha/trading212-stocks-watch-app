@@ -38,8 +38,29 @@ import java.util.Locale
 private val Gain = Color(0xFF4CAF50)
 private val Loss = Color(0xFFF44336)
 
-private fun money(v: Double): String = String.format(Locale.US, "%,.2f", v)
-private fun signed(v: Double): String = (if (v >= 0) "+" else "") + money(v)
+private fun symbol(code: String?): String? = when (code) {
+    "EUR" -> "€"
+    "USD" -> "$"
+    "GBP" -> "£"
+    "GBX" -> "p"
+    else -> code
+}
+
+private fun money(v: Double, currency: String? = null): String {
+    val n = String.format(Locale.US, "%,.2f", v)
+    return when (currency) {
+        null -> n
+        "EUR", "USD", "GBP" -> "${symbol(currency)}$n"
+        else -> "$n ${symbol(currency)}"
+    }
+}
+
+private fun signed(v: Double, currency: String? = null): String =
+    (if (v >= 0) "+" else "") + money(v, currency)
+
+private fun percent(v: Double): String =
+    (if (v >= 0) "+" else "") + String.format(Locale.US, "%.1f%%", v)
+
 private fun pplColor(v: Double): Color = if (v >= 0) Gain else Loss
 
 class MainActivity : ComponentActivity() {
@@ -93,11 +114,11 @@ fun PortfolioScreen(viewModel: PortfolioViewModel = viewModel()) {
                 item { ListHeader { Text("Trading 212") } }
 
                 s.cash?.let { cash ->
-                    item { SummaryCard(cash) }
+                    item { SummaryCard(cash, s.currencyCode) }
                 }
 
                 items(s.positions, key = { it.ticker }) { position ->
-                    PositionChip(position)
+                    PositionChip(position, s.currencyCode)
                 }
 
                 item {
@@ -116,7 +137,7 @@ fun PortfolioScreen(viewModel: PortfolioViewModel = viewModel()) {
 }
 
 @Composable
-private fun SummaryCard(cash: AccountCash) {
+private fun SummaryCard(cash: AccountCash, currency: String?) {
     Card(onClick = {}, modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.fillMaxWidth()) {
             cash.total?.let {
@@ -125,7 +146,7 @@ private fun SummaryCard(cash: AccountCash) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text("Total", style = MaterialTheme.typography.caption2)
-                    Text(money(it), style = MaterialTheme.typography.caption1)
+                    Text(money(it, currency), style = MaterialTheme.typography.caption1)
                 }
             }
             cash.invested?.let {
@@ -134,16 +155,27 @@ private fun SummaryCard(cash: AccountCash) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text("Invested", style = MaterialTheme.typography.caption2)
-                    Text(money(it), style = MaterialTheme.typography.caption1)
+                    Text(money(it, currency), style = MaterialTheme.typography.caption1)
                 }
             }
-            cash.ppl?.let {
+            cash.ppl?.let { ppl ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Text("P/L", style = MaterialTheme.typography.caption2)
-                    Text(signed(it), style = MaterialTheme.typography.caption1, color = pplColor(it))
+                    Text(signed(ppl, currency), style = MaterialTheme.typography.caption1, color = pplColor(ppl))
+                }
+                val invested = cash.invested
+                if (invested != null && invested > 0) {
+                    val pct = ppl / invested * 100
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text("Return", style = MaterialTheme.typography.caption2)
+                        Text(percent(pct), style = MaterialTheme.typography.caption1, color = pplColor(pct))
+                    }
                 }
             }
         }
@@ -151,7 +183,13 @@ private fun SummaryCard(cash: AccountCash) {
 }
 
 @Composable
-private fun PositionChip(position: Position) {
+private fun PositionChip(position: Position, accountCurrency: String?) {
+    val valueEur = position.valueInAccountCurrency
+    val valueText = if (valueEur != null) {
+        money(valueEur, accountCurrency)
+    } else {
+        money(position.value, position.priceCurrency ?: accountCurrency)
+    }
     Chip(
         modifier = Modifier.fillMaxWidth(),
         onClick = {},
@@ -166,7 +204,7 @@ private fun PositionChip(position: Position) {
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Text(money(position.currentPrice))
+                Text(valueText)
             }
         },
         secondaryLabel = {
@@ -174,8 +212,10 @@ private fun PositionChip(position: Position) {
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(String.format(Locale.US, "%.4f", position.quantity).trimEnd('0').trimEnd('.') + " sh")
-                Text(signed(position.ppl), color = pplColor(position.ppl))
+                Text(signed(position.ppl, accountCurrency), color = pplColor(position.ppl))
+                position.returnPercent?.let {
+                    Text(percent(it), color = pplColor(it))
+                }
             }
         },
     )

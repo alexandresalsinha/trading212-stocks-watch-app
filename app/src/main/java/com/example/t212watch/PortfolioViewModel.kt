@@ -14,6 +14,7 @@ sealed interface PortfolioUiState {
     data class Success(
         val positions: List<Position>,
         val cash: AccountCash?,
+        val currencyCode: String?,
     ) : PortfolioUiState
 }
 
@@ -21,6 +22,9 @@ class PortfolioViewModel : ViewModel() {
 
     private val _uiState = MutableStateFlow<PortfolioUiState>(PortfolioUiState.Loading)
     val uiState: StateFlow<PortfolioUiState> = _uiState
+
+    // Account currency never changes, fetch it once per process.
+    private var currencyCode: String? = null
 
     init {
         refresh()
@@ -31,13 +35,20 @@ class PortfolioViewModel : ViewModel() {
         viewModelScope.launch {
             try {
                 val positions = Trading212Api.service.getPortfolio()
-                    .sortedByDescending { it.value }
+                    .sortedByDescending { it.valueInAccountCurrency ?: it.value }
                 val cash = try {
                     Trading212Api.service.getAccountCash()
                 } catch (_: Exception) {
                     null
                 }
-                _uiState.value = PortfolioUiState.Success(positions, cash)
+                if (currencyCode == null) {
+                    currencyCode = try {
+                        Trading212Api.service.getAccountInfo().currencyCode
+                    } catch (_: Exception) {
+                        null
+                    }
+                }
+                _uiState.value = PortfolioUiState.Success(positions, cash, currencyCode)
             } catch (e: HttpException) {
                 val msg = when (e.code()) {
                     401 -> "Invalid API key"
